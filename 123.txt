@@ -1,0 +1,610 @@
+Основные маршруты (web.php)
+Route::get('/', fn () => view('welcome'));
+
+// Аутентификация
+Route::get('/register', [AuthController::class, 'showRegister']);
+Route::post('/register', [AuthController::class, 'register']);
+Route::get('/login', [AuthController::class, 'showLogin']);
+Route::post('/login', [AuthController::class, 'login']);
+Route::post('/logout', [AuthController::class, 'logout']);
+
+// Пользовательские маршруты
+Route::middleware('auth')->group(function () {
+    Route::get('/dashboard', [BookingController::class, 'index']);
+    Route::get('/booking', [BookingController::class, 'create']);
+    Route::post('/booking', [BookingController::class, 'store']);
+    Route::post('/review/{booking}', [ReviewController::class, 'store']);
+});
+
+// Админка
+Route::middleware('is_admin')->group(function () {
+    Route::get('/admin', [AdminController::class, 'index']);
+    Route::patch('/admin/booking/{id}/status', [AdminController::class, 'updateStatus']);
+});
+
+composer create-project laravel/laravel ybudu_kushac
+cd ybudu_kushac
+php artisan make:auth
+php artisan migrate
+php artisan serve
+
+// === Шаг 1: Создание проекта ===
+// В терминале:
+// composer create-project laravel/laravel ybudu_kushac
+// cd ybudu_kushac
+
+// === Шаг 2: Настройка .env ===
+// .env
+DB_DATABASE=ybudu_kushac
+db_username=root
+db_password=
+
+// === Шаг 3: Миграции ===
+php artisan make:migration create_bookings_table
+php artisan make:migration create_reviews_table
+
+// database/migrations/XXXX_create_bookings_table.php
+Schema::create('bookings', function (Blueprint $table) {
+    $table->id();
+    $table->foreignId('user_id')->constrained()->onDelete('cascade');
+    $table->dateTime('date_time');
+    $table->unsignedTinyInteger('guests');
+    $table->string('phone');
+    $table->string('status')->default('Новое');
+    $table->timestamps();
+});
+
+// database/migrations/XXXX_create_reviews_table.php
+Schema::create('reviews', function (Blueprint $table) {
+    $table->id();
+    $table->foreignId('user_id')->constrained()->onDelete('cascade');
+    $table->foreignId('booking_id')->constrained()->onDelete('cascade');
+    $table->text('content');
+    $table->timestamps();
+});
+
+// === Шаг 4: Модель User.php ===
+class User extends Authenticatable
+{
+    use HasFactory, Notifiable;
+
+    protected $fillable = [
+        'login', 'password', 'name', 'surname', 'phone', 'email', 'is_admin'
+    ];
+
+    protected $hidden = ['password', 'remember_token'];
+
+    public function bookings() {
+        return $this->hasMany(Booking::class);
+    }
+
+    public function reviews() {
+        return $this->hasMany(Review::class);
+    }
+}
+
+// === Шаг 5: Модели Booking и Review ===
+class Booking extends Model
+{
+    use HasFactory;
+    protected $fillable = ['user_id', 'date_time', 'guests', 'phone', 'status'];
+    public function user() {
+        return $this->belongsTo(User::class);
+    }
+    public function review() {
+        return $this->hasOne(Review::class);
+    }
+}
+
+class Review extends Model
+{
+    use HasFactory;
+    protected $fillable = ['user_id', 'booking_id', 'content'];
+    public function user() {
+        return $this->belongsTo(User::class);
+    }
+    public function booking() {
+        return $this->belongsTo(Booking::class);
+    }
+}
+
+// === Шаг 6: Роутинг ===
+// routes/web.php
+use App\Http\Controllers\AuthController;
+use App\Http\Controllers\BookingController;
+use App\Http\Controllers\AdminController;
+use App\Http\Controllers\ReviewController;
+
+Route::get('/register', [AuthController::class, 'showRegister']);
+Route::post('/register', [AuthController::class, 'register']);
+Route::get('/login', [AuthController::class, 'showLogin']);
+Route::post('/login', [AuthController::class, 'login']);
+Route::post('/logout', [AuthController::class, 'logout']);
+
+Route::middleware('auth')->group(function () {
+    Route::get('/dashboard', [BookingController::class, 'index']);
+    Route::get('/booking', [BookingController::class, 'create']);
+    Route::post('/booking', [BookingController::class, 'store']);
+    Route::post('/review/{booking}', [ReviewController::class, 'store']);
+});
+
+Route::middleware(['auth', 'admin'])->group(function () {
+    Route::get('/admin', [AdminController::class, 'index']);
+    Route::patch('/admin/booking/{id}/status', [AdminController::class, 'updateStatus']);
+});
+
+// === Шаг 7: Контроллер AuthController ===
+php artisan make:controller AuthController
+
+// app/Http/Controllers/AuthController.php
+
+namespace App\Http\Controllers;
+
+use App\Models\User;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rule;
+
+class AuthController extends Controller
+{
+    public function showRegister()
+    {
+        return view('register');
+    }
+
+    public function register(Request $request)
+    {
+        $request->validate([
+            'login' => ['required', 'string', 'min:6', 'regex:/^[А-Яа-яЁё\s]+$/u', Rule::unique('users', 'login')],
+            'password' => 'required|string|min:6',
+            'name' => 'required|string',
+            'surname' => 'required|string',
+            'phone' => ['required', 'regex:/^\+7\(\d{3}\)-\d{3}-\d{2}-\d{2}$/'],
+            'email' => 'required|email|unique:users',
+        ]);
+
+        $user = User::create([
+            'login' => $request->login,
+            'password' => Hash::make($request->password),
+            'name' => $request->name,
+            'surname' => $request->surname,
+            'phone' => $request->phone,
+            'email' => $request->email,
+            'is_admin' => false,
+        ]);
+
+        Auth::login($user);
+        return redirect('/dashboard');
+    }
+
+    public function showLogin()
+    {
+        return view('login');
+    }
+
+    public function login(Request $request)
+    {
+        $request->validate([
+            'login' => 'required|string',
+            'password' => 'required|string',
+        ]);
+
+        if (Auth::attempt(['login' => $request->login, 'password' => $request->password])) {
+            return redirect(Auth::user()->is_admin ? '/admin' : '/dashboard');
+        }
+
+        return back()->withErrors(['login' => 'Неверный логин или пароль']);
+    }
+
+    public function logout(Request $request)
+    {
+        Auth::logout();
+        return redirect('/login');
+    }
+}
+
+// === Шаг 8: Контроллер BookingController ===
+php artisan make:controller BookingController
+
+// app/Http/Controllers/BookingController.php
+namespace App\Http\Controllers;
+
+use Illuminate\Http\Request;
+use App\Models\Booking;
+use Illuminate\Support\Facades\Auth;
+
+class BookingController extends Controller
+{
+    public function index()
+    {
+        $bookings = Auth::user()->bookings()->with('review')->get();
+        return view('dashboard', compact('bookings'));
+    }
+
+    public function create()
+    {
+        return view('booking');
+    }
+
+    public function store(Request $request)
+    {
+        $request->validate([
+            'date' => 'required|date',
+            'time' => 'required',
+            'guests' => 'required|integer|min:1|max:10',
+            'phone' => 'required|regex:/^\\+7\\(\\d{3}\\)-\\d{3}-\\d{2}-\\d{2}$/'
+        ]);
+
+        Booking::create([
+            'user_id' => Auth::id(),
+            'date_time' => "{$request->date} {$request->time}",
+            'guests' => $request->guests,
+            'phone' => $request->phone,
+            'status' => 'Новое'
+        ]);
+
+        return redirect('/dashboard')->with('success', 'Бронирование отправлено на рассмотрение.');
+    }
+}
+
+// === Шаг 9: Контроллер ReviewController ===
+php artisan make:controller ReviewController
+
+// app/Http/Controllers/ReviewController.php
+namespace App\Http\Controllers;
+
+use Illuminate\Http\Request;
+use App\Models\Review;
+use App\Models\Booking;
+use Illuminate\Support\Facades\Auth;
+
+class ReviewController extends Controller
+{
+    public function store(Request $request, Booking $booking)
+    {
+        $request->validate([
+            'content' => 'required|string|min:10'
+        ]);
+
+        if ($booking->user_id !== Auth::id() || $booking->status !== 'Посещение состоялось') {
+            return back()->withErrors(['access' => 'Вы не можете оставить отзыв.']);
+        }
+
+        Review::create([
+            'user_id' => Auth::id(),
+            'booking_id' => $booking->id,
+            'content' => $request->content
+        ]);
+
+        return back()->with('success', 'Отзыв добавлен!');
+    }
+}
+
+// === Шаг 10: Контроллер AdminController ===
+php artisan make:controller AdminController
+
+// app/Http/Controllers/AdminController.php
+namespace App\Http\Controllers;
+
+use Illuminate\Http\Request;
+use App\Models\Booking;
+
+class AdminController extends Controller
+{
+    public function index()
+    {
+        $bookings = Booking::with('user')->orderBy('created_at', 'desc')->paginate(10);
+        return view('admin', compact('bookings'));
+    }
+
+    public function updateStatus($id, Request $request)
+    {
+        $request->validate([
+            'status' => 'required|in:Посещение состоялось,Отменено'
+        ]);
+
+        $booking = Booking::findOrFail($id);
+        $booking->status = $request->status;
+        $booking->save();
+
+        return redirect('/admin')->with('success', 'Статус обновлён.');
+    }
+}
+
+// === Шаг 11: Middleware Admin ===
+php artisan make:middleware AdminMiddleware
+
+// app/Http/Middleware/AdminMiddleware.php
+namespace App\Http\Middleware;
+
+use Closure;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+
+class AdminMiddleware
+{
+    public function handle(Request $request, Closure $next)
+    {
+        if (!Auth::check() || !Auth::user()->is_admin) {
+            abort(403, 'Нет доступа');
+        }
+        return $next($request);
+    }
+}
+
+// app/Http/Kernel.php
+protected $routeMiddleware = [
+    // ...
+    'admin' => \App\Http\Middleware\AdminMiddleware::class,
+];
+
+// === Шаг 12: Представления Blade ===
+
+// resources/views/register.blade.php
+@extends('layout')
+@section('content')
+<h2>Регистрация</h2>
+<form method="POST" action="/register">
+    @csrf
+    <input name="login" class="form-control mb-2" placeholder="Логин (мин. 6 символов, кириллица)" required>
+    <input name="password" type="password" class="form-control mb-2" placeholder="Пароль (мин. 6 символов)" required>
+    <input name="name" class="form-control mb-2" placeholder="Имя" required>
+    <input name="surname" class="form-control mb-2" placeholder="Фамилия" required>
+    <input name="phone" class="form-control mb-2" placeholder="+7(XXX)-XXX-XX-XX" required>
+    <input name="email" type="email" class="form-control mb-2" placeholder="E-mail" required>
+    <button class="btn btn-primary">Зарегистрироваться</button>
+</form>
+@endsection
+
+// resources/views/login.blade.php
+@extends('layout')
+@section('content')
+<h2>Вход</h2>
+<form method="POST" action="/login">
+    @csrf
+    <input name="login" class="form-control mb-2" placeholder="Логин" required>
+    <input name="password" type="password" class="form-control mb-2" placeholder="Пароль" required>
+    <button class="btn btn-success">Войти</button>
+</form>
+@endsection
+
+// resources/views/dashboard.blade.php
+@extends('layout')
+@section('content')
+<h2>Ваши бронирования</h2>
+@foreach ($bookings as $booking)
+    <div class="card mb-2">
+        <div class="card-body">
+            <p><strong>Дата:</strong> {{ $booking->date_time }}</p>
+            <p><strong>Гостей:</strong> {{ $booking->guests }}</p>
+            <p><strong>Статус:</strong> {{ $booking->status }}</p>
+            @if ($booking->status === 'Посещение состоялось' && !$booking->review)
+                <form method="POST" action="/review/{{ $booking->id }}">
+                    @csrf
+                    <textarea name="content" class="form-control mb-2" placeholder="Оставьте отзыв..."></textarea>
+                    <button class="btn btn-secondary">Отправить отзыв</button>
+                </form>
+            @elseif ($booking->review)
+                <p><strong>Отзыв:</strong> {{ $booking->review->content }}</p>
+            @endif
+        </div>
+    </div>
+@endforeach
+@endsection
+
+// resources/views/booking.blade.php
+@extends('layout')
+@section('content')
+<h2>Бронирование столика</h2>
+<form method="POST" action="/booking">
+    @csrf
+    <input type="date" name="date" class="form-control mb-2" required>
+    <input type="time" name="time" class="form-control mb-2" required>
+    <input type="number" name="guests" class="form-control mb-2" min="1" max="10" required>
+    <input type="text" name="phone" class="form-control mb-2" placeholder="+7(XXX)-XXX-XX-XX" required>
+    <button class="btn btn-primary">Забронировать</button>
+</form>
+@endsection
+
+
+@extends('layout')
+@section('content')
+<h2>Панель администратора</h2>
+
+@foreach ($bookings as $booking)
+    <div class="card mb-3">
+        <div class="card-body">
+            <p><strong>Пользователь:</strong> {{ $booking->user->login }}</p>
+            <p><strong>Дата:</strong> {{ $booking->date_time }}</p>
+            <p><strong>Гостей:</strong> {{ $booking->guests }}</p>
+            <p><strong>Телефон:</strong> {{ $booking->phone }}</p>
+            <p><strong>Текущий статус:</strong> {{ $booking->status }}</p>
+
+            <form method="POST" action="/admin/booking/{{ $booking->id }}/status">
+                @csrf
+                @method('PATCH')
+                <div class="d-flex">
+                    <select name="status" class="form-select me-2">
+                        <option value="Посещение состоялось">Посещение состоялось</option>
+                        <option value="Отменено">Отменено</option>
+                    </select>
+                    <button class="btn btn-sm btn-outline-primary">Обновить</button>
+                </div>
+            </form>
+        </div>
+    </div>
+@endforeach
+@endsection
+
+
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Я буду кушац</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        /* Небольшие стили для улучшения внешнего вида */
+        .navbar-brand {
+            font-weight: bold;
+        }
+
+        .navbar-nav .nav-link {
+            padding-right: 0.75rem;
+            padding-left: 0.75rem;
+        }
+    </style>
+</head>
+<body>
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container">
+        <a class="navbar-brand" href="#">Я буду кушац</a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse justify-content-end" id="navbarNav">
+            <ul class="navbar-nav">
+                @guest
+                <li class="nav-item">
+                    <a href="/register" class="nav-link btn btn-outline-secondary">Регистрация</a>
+                </li>
+                <li class="nav-item">
+                    <a href="/login" class="nav-link btn btn-outline-secondary me-2">Войти</a>
+                </li>
+                @else
+                    <li class="nav-item">
+                        <a href="/dashboard" class="nav-link btn btn-outline-secondary me-2">Просмотр заявок</a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/booking" class="nav-link btn btn-outline-secondary me-2">Забронировать столик</a>
+                    </li>
+                    @if(auth()->user()->is_admin)
+                        <li class="nav-item">
+                            <a href="/admin" class="nav-link btn btn-outline-secondary me-2">Админ панель</a>
+                        </li>
+                    @endif
+                    <li class="nav-item">
+                        <form method="POST" action="/logout">
+                            @csrf
+                            <button class="nav-link btn btn-outline-secondary">Выйти</button>
+                        </form>
+                    </li>
+                @endguest
+            </ul>
+        </div>
+    </div>
+</nav>
+<div class="container mt-4">
+    @if(session('success'))<div class="alert alert-success">{{ session('success') }}</div>@endif
+    @if($errors->any())<div class="alert alert-danger">{{ implode(', ', $errors->all()) }}</div>@endif
+    @yield('content')
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
+
+<?php
+
+namespace App\Models;
+
+// use Illuminate\Contracts\Auth\MustVerifyEmail;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Foundation\Auth\User as Authenticatable;
+use Illuminate\Notifications\Notifiable;
+use Laravel\Sanctum\HasApiTokens;
+
+class User extends Authenticatable
+{
+    use HasFactory, Notifiable;
+
+    protected $fillable = [
+        'login', 'password', 'name', 'surname', 'phone', 'email', 'is_admin'
+    ];
+
+    protected $hidden = ['password', 'remember_token'];
+
+    public function bookings() {
+        return $this->hasMany(Booking::class);
+    }
+
+    public function reviews() {
+        return $this->hasMany(Review::class);
+    }
+}
+
+
+
+
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\User;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rule;
+
+class AuthController extends Controller
+{
+    public function showRegister()
+    {
+        return view('register');
+    }
+
+    public function register(Request $request)
+    {
+        $request->validate([
+            'login' => ['required', 'string', 'min:6', 'regex:/^[a-zA-Z0-9_]+$/', Rule::unique('users', 'login')],
+            'password' => 'required|string|min:6',
+            'name' => 'required|string',
+            'surname' => 'required|string',
+            'phone' => ['required', 'string', 'regex:/^\+7\(\d{3}\)-\d{3}-\d{2}-\d{2}$/'],
+            'email' => 'required|email|unique:users',
+        ]);
+
+        $user = User::create([
+            'login' => $request->login,
+            'password' => Hash::make($request->password),
+            'name' => $request->name,
+            'surname' => $request->surname,
+            'phone' => $request->phone,
+            'email' => $request->email,
+            'is_admin' => false,
+        ]);
+
+        Auth::login($user);
+        return redirect('/dashboard');
+    }
+
+    public function showLogin()
+    {
+        return view('login');
+    }
+
+    public function login(Request $request)
+    {
+        $request->validate([
+            'login' => 'required|string',
+            'password' => 'required|string',
+        ]);
+
+        if (Auth::attempt(['login' => $request->login, 'password' => $request->password])) {
+            return redirect(Auth::user()->is_admin ? '/admin' : '/dashboard');
+        }
+
+        return back()->withErrors(['login' => 'Неверный логин или пароль']);
+    }
+
+    public function logout(Request $request)
+    {
+        Auth::logout();
+        return redirect('/login');
+    }
+}
+
+
+
