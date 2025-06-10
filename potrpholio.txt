@@ -3,4 +3,19 @@ d9845612Dt17mr
 genapopoa57DA65141451345411@gmail.com
 php artisan migrate
 и мейби бейби вооот в файлике)
-
+https://github.com/nagaev1/gena
+скачать
+перекинуть
+перекинуть в openserver в домены
+добавить в доменах
+убрать после .envZZZZZZZZZZZZZZ
+composer install
+php artitan migrate
+php artisan migrate:rollback <- на случай если заново всё делать
+если что чекунть в папке .env базу данных, поменять название
+понажимать зеленые кнопочки если они поялвяются 
+("php artisan key:generate")
+И ПОТОМ РЕКВИЕМ
+php artisan migrate:rollback РАЗА ДВА
+php artitan migrate
+НЕ ПУТАТСЯ В НАЗВАНИЯХ В БД В АДМИНPHP
